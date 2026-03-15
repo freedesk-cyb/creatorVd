@@ -12,6 +12,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+// Logger to see requests in Railway logs
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    next();
+});
+
 // Store statuses in memory (use Redis or DB for production)
 const tasks = {};
 
@@ -47,6 +53,11 @@ app.get('/api/status/:id', (req, res) => {
         return res.status(404).json({ error: 'Task not found' });
     }
     res.json(task);
+});
+
+// Catch-all for undefined routes
+app.use((req, res) => {
+    res.status(404).json({ error: 'Route not found' });
 });
 
 app.listen(PORT, () => {
