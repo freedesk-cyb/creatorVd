@@ -3,6 +3,8 @@ import Head from 'next/head';
 import { Video, Play, Download, Loader2, Send, Languages } from 'lucide-react';
 
 export default function Home() {
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+
   const [text, setText] = useState('');
   const [voice, setVoice] = useState('facebook/mms-tts-spa');
   const [taskId, setTaskId] = useState(null);
@@ -17,12 +19,12 @@ export default function Home() {
     if (taskId && !videoUrl && !error) {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`http://localhost:5000/api/status/${taskId}`);
+          const res = await fetch(`${API_BASE_URL}/api/status/${taskId}`);
           const data = await res.json();
           setStatus(data.status);
           setProgress(data.progress);
           if (data.status === 'completed') {
-            setVideoUrl(`http://localhost:5000${data.videoUrl}`);
+            setVideoUrl(`${API_BASE_URL}${data.videoUrl}`);
             setLoading(false);
             clearInterval(interval);
           } else if (data.status === 'failed') {
@@ -36,7 +38,7 @@ export default function Home() {
       }, 2000);
     }
     return () => clearInterval(interval);
-  }, [taskId, videoUrl, error]);
+  }, [taskId, videoUrl, error, API_BASE_URL]);
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -47,7 +49,7 @@ export default function Home() {
     setStatus('Iniciando...');
 
     try {
-      const res = await fetch('http://localhost:5000/api/generate', {
+      const res = await fetch(`${API_BASE_URL}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice }),
