@@ -51,7 +51,19 @@ Navega a la carpeta `frontend/` y realiza lo siguiente:
 6.  Previsualiza y descarga tu video.
 
 ## Despliegue en Vercel
+
 Para desplegar el frontend en Vercel:
-1.  Sube el código a un repositorio de GitHub.
-2.  Conecta tu repo a Vercel.
-3.  **Nota**: El backend requiere un servidor con FFmpeg instalado. Puedes usar una instancia de EC2, Render, o Railway que soporte FFmpeg para el backend.
+
+1.  **Sube el código a GitHub** (Ya realizado).
+2.  **En Vercel**:
+    *   Importa el repositorio `creatorVd`.
+    *   **Root Directory**: Establece la carpeta `frontend`.
+    *   **Environment Variables**: Agrega `NEXT_PUBLIC_API_URL` con la URL de tu backend desplegado (ej. `https://mi-backend.railway.app`).
+3.  **Deploy**.
+
+## Despliegue del Backend (Importante)
+
+Vercel no soporta FFmpeg de forma nativa para procesos largos. Para el backend, te recomiendo usar:
+
+*   **Railway.app** o **Render.com**: Soportan Node.js y permiten instalar FFmpeg fácilmente mediante un `Dockerfile` o paquetes del sistema.
+*   **Variables de Entorno en el Backend**: Asegúrate de configurar `HF_TOKEN` en tu plataforma de hosting.
