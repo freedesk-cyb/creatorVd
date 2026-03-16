@@ -23,21 +23,24 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
     fs.mkdirSync(sessionDir);
 
     try {
-        onProgress('Analizando texto y escenas...', 10);
-        const segments = text.split(/[.!?]+/).filter(s => s.trim().length > 0).map(s => s.trim());
-        
         onProgress('Generando audio (Google TTS)...', 20);
         const audioPath = path.join(sessionDir, 'narration.wav');
         
-        // Get Google TTS URL (Unlimited for short texts, using simple getAudioUrl)
-        const url = googleTTS.getAudioUrl(text, {
+        // Support longer texts by splitting into chunks (200 chars limit for standard Google TTS)
+        const results = googleTTS.getAllAudioUrls(text, {
             lang: 'es',
             slow: false,
             host: 'https://translate.google.com',
+            splitPunct: '.,!? ',
         });
 
-        const audioRes = await axios.get(url, { responseType: 'arraybuffer' });
-        fs.writeFileSync(audioPath, Buffer.from(audioRes.data));
+        // Download and concat all audio buffers
+        const audioBuffers = [];
+        for (const res of results) {
+            const audioData = await axios.get(res.url, { responseType: 'arraybuffer' });
+            audioBuffers.push(Buffer.from(audioRes.data || audioData.data));
+        }
+        fs.writeFileSync(audioPath, Buffer.concat(audioBuffers));
 
         onProgress('Generando imágenes (Pollinations.ai)...', 40);
         const imagePaths = [];
@@ -47,7 +50,7 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
             const imgPath = path.join(sessionDir, `img_${i}.jpg`);
             
             // Pollinations.ai URL-based generation
-            const prompt = encodeURIComponent(segments[i] + ", high quality, 4k, vertical cinematic");
+            const prompt = encodeURIComponent(segments[i] + ", high quality, 4k, vertical cinematic style, detailed");
             const pollUrl = `https://pollinations.ai/p/${prompt}?width=1080&height=1920&seed=${Math.floor(Math.random() * 100000)}&model=flux&nologo=true`;
             
             console.log(`Downloading image from: ${pollUrl}`);
@@ -92,32 +95,39 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
             command.input(img).loop(segmentDuration);
         });
 
+        command.input(audioPath);
+
+        const filterComplex = [
+            ...imagePaths.map((_, i) => ({
+                filter: 'scale',
+                options: '1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
+                inputs: i.toString(),
+                outputs: `v${i}`
+            })),
+            {
+                filter: 'concat',
+                options: { n: imagePaths.length, v: 1, a: 0 },
+                inputs: imagePaths.map((_, i) => `v${i}`),
+                outputs: 'vout'
+            }
+        ];
+
         command
-            .input(audioPath)
-            .complexFilter([
-                ...imagePaths.map((_, i) => ({
-                    filter: 'scale',
-                    options: '1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
-                    inputs: i.toString(),
-                    outputs: `v${i}`
-                })),
-                {
-                    filter: 'concat',
-                    options: { n: imagePaths.length, v: 1, a: 0 },
-                    inputs: imagePaths.map((_, i) => `v${i}`),
-                    outputs: 'vout'
-                }
-            ])
+            .complexFilter(filterComplex)
             .map('vout')
-            .map(`${imagePaths.length}:a`) // Map audio from the last input
+            .map(`${imagePaths.length}:a`) // Map the audio from the LAST input explicitly
             .videoCodec('libx264')
             .audioCodec('aac')
             .outputOptions([
                 '-pix_fmt yuv420p',
-                '-shortest'
+                '-shortest',
+                '-y' // Overwrite
             ])
             .on('end', () => resolve())
-            .on('error', (err) => reject(err))
+            .on('error', (err) => {
+                console.error('FFmpeg Error:', err.message);
+                reject(err);
+            })
             .save(outputPath);
     });
 }
