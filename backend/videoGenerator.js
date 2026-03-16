@@ -130,14 +130,18 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
             filterStr.push(`[v0]null[vout]`);
         }
 
+        // Pass audio through filter graph to give it an explicit label
+        // This is required when using complexFilter to avoid indexing confusion
+        filterStr.push(`[${audioIndex}:a]anull[aout]`);
+
         command
             .complexFilter(filterStr.join('; '))
             .map('[vout]')
-            .map(`${audioIndex}:a`)
+            .map('[aout]')
             .videoCodec('libx264')
             .audioCodec('aac')
             .addOptions([
-                '-preset ultrafast', // Use ultrafast for minimal RAM usage
+                '-preset ultrafast', 
                 '-tune stillimage',
                 '-shortest',
                 '-pix_fmt yuv420p',
