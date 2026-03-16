@@ -100,6 +100,16 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
     } catch (error) {
         console.error('Error detallado en generateVideo:', error);
         throw error;
+    } finally {
+        // Cleanup session directory to save disk space
+        try {
+            if (fs.existsSync(sessionDir)) {
+                fs.rmSync(sessionDir, { recursive: true, force: true });
+                console.log(`Cleaned up session directory: ${taskId}`);
+            }
+        } catch (cleanupErr) {
+            console.error('Error during cleanup:', cleanupErr);
+        }
     }
 }
 
@@ -140,7 +150,6 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
         }
 
         // Pass audio through filter graph to give it an explicit label
-        // This is required when using complexFilter to avoid indexing confusion
         filterStr.push(`[${audioIndex}:a]anull[aout]`);
 
         command
@@ -157,13 +166,28 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
                 '-y'
             ])
             .on('start', (cmd) => console.log('Executing FFmpeg:', cmd))
-            .on('end', () => resolve())
+            .on('progress', (progress) => {
+                if (progress.percent) {
+                    // Map 0-100% of FFmpeg to 85-98% of total progress
+                    const totalProgress = 85 + (progress.percent * 0.13);
+                    onProgress(`Ensamblando video... ${Math.round(progress.percent)}%`, totalProgress);
+                }
+            })
+            .on('end', () => {
+                console.log('FFmpeg completed successfully');
+                resolve();
+            })
             .on('error', (err, stdout, stderr) => {
                 console.error('FFmpeg Error:', err.message);
                 console.error('FFmpeg stderr:', stderr);
                 reject(err);
             })
             .save(outputPath);
+            
+        // Set a timeout of 3 minutes for FFmpeg assembly
+        setTimeout(() => {
+            reject(new Error('El ensamblado del video tardó demasiado (Timeout).'));
+        }, 180000); 
     });
 }
 
