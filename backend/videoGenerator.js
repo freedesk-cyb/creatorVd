@@ -64,8 +64,9 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
             const imgPath = path.join(sessionDir, `img_${i}.jpg`);
             
             // Pollinations.ai URL-based generation
-            const prompt = encodeURIComponent(segments[i] + ", vertical cinematic, high detail, colorful, 4k");
-            const pollUrl = `https://pollinations.ai/p/${prompt}?width=1080&height=1920&seed=${Math.floor(Math.random() * 100000)}&nologo=true`;
+            // Optimized for low-RAM server: 720x1280 (HD Vertical)
+            const prompt = encodeURIComponent(segments[i] + ", vertical cinematic style, highly detailed, vivid colors");
+            const pollUrl = `https://pollinations.ai/p/${prompt}?width=720&height=1280&seed=${Math.floor(Math.random() * 100000)}&nologo=true`;
             
             console.log(`Requesting image ${i}: ${pollUrl}`);
             const imgRes = await axios.get(pollUrl, { responseType: 'arraybuffer' });
@@ -76,7 +77,7 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
         onProgress('Calculando duración...', 75);
         const duration = await getAudioDuration(audioPath);
         const segmentDuration = duration / segments.length;
-        console.log(`Total duration: ${duration}s, per segment: ${segmentDuration}s`);
+        console.log(`Stats: Duration=${duration}s, SegDuration=${segmentDuration}s, Segments=${segments.length}`);
 
         onProgress('Ensamblando video final (FFmpeg)...', 85);
         const outputFilename = `video_${taskId}.mp4`;
@@ -97,7 +98,7 @@ function getAudioDuration(audioPath) {
     return new Promise((resolve, reject) => {
         ffmpeg.ffprobe(audioPath, (err, metadata) => {
             if (err) return reject(new Error(`Fallo al analizar audio: ${err.message}`));
-            resolve(metadata.format.duration || 0);
+            resolve(metadata.format.duration || 1);
         });
     });
 }
@@ -106,7 +107,7 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
     return new Promise((resolve, reject) => {
         const command = ffmpeg();
 
-        // 1. Add all images
+        // 1. Add images as loop inputs
         imagePaths.forEach((img) => {
             command.input(img).inputOptions(['-loop 1']).inputOptions([`-t ${segmentDuration}`]);
         });
@@ -115,17 +116,13 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
         command.input(audioPath);
 
         const audioIndex = imagePaths.length;
-        console.log(`FFmpeg Assembly Started: ${imagePaths.length} images, audio at index ${audioIndex}`);
 
-        // 3. Build robust filter complex
+        // 3. Optimized filter for 720x1280 (Vertical HD)
         const filterStr = [];
-        
-        // Scale each image and label it
         imagePaths.forEach((_, i) => {
-            filterStr.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[v${i}]`);
+            filterStr.push(`[${i}:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,format=yuv420p[v${i}]`);
         });
 
-        // Concat video streams if more than 1 image
         if (imagePaths.length > 1) {
             const videoInputs = imagePaths.map((_, i) => `[v${i}]`).join('');
             filterStr.push(`${videoInputs}concat=n=${imagePaths.length}:v=1:a=0[vout]`);
@@ -133,21 +130,20 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
             filterStr.push(`[v0]null[vout]`);
         }
 
-        // Label the audio stream explicitly to avoid index errors
-        filterStr.push(`[${audioIndex}:a]anull[aout]`);
-
         command
             .complexFilter(filterStr.join('; '))
             .map('[vout]')
-            .map('[aout]')
+            .map(`${audioIndex}:a`)
             .videoCodec('libx264')
             .audioCodec('aac')
             .addOptions([
-                '-pix_fmt yuv420p',
+                '-preset ultrafast', // Use ultrafast for minimal RAM usage
+                '-tune stillimage',
                 '-shortest',
+                '-pix_fmt yuv420p',
                 '-y'
             ])
-            .on('start', (cmd) => console.log('FFmpeg command:', cmd))
+            .on('start', (cmd) => console.log('Executing FFmpeg:', cmd))
             .on('end', () => resolve())
             .on('error', (err, stdout, stderr) => {
                 console.error('FFmpeg Error:', err.message);
