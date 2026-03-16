@@ -58,7 +58,7 @@ export default function Home() {
       if (data.error) throw new Error(data.error);
       setTaskId(data.taskId);
     } catch (err) {
-      setError(err.message);
+      setError(`Error de conexión: ${err.message}. (URL intentada: ${API_BASE_URL}). Asegúrate de que el backend esté encendido y la URL sea HTTPS.`);
       setLoading(false);
     }
   };
