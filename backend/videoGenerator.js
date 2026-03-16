@@ -1,12 +1,10 @@
-const { HfInference } = require('@huggingface/inference');
+const googleTTS = require('google-tts-api');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
-
-const hf = new HfInference(process.env.HF_TOKEN);
 
 // Ensure temp directory exists
 const TEMP_DIR = path.join(__dirname, 'temp');
@@ -25,92 +23,54 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
     fs.mkdirSync(sessionDir);
 
     try {
-        onProgress('Analyzing text and segments...', 10);
-        // Split text by sentences or roughly by length
+        onProgress('Analizando texto y escenas...', 10);
         const segments = text.split(/[.!?]+/).filter(s => s.trim().length > 0).map(s => s.trim());
         
-        onProgress('Generating audio narration...', 20);
+        onProgress('Generando audio (Google TTS)...', 20);
         const audioPath = path.join(sessionDir, 'narration.wav');
         
-        // Use the new router with the hf-inference provider prefix
-        const modelId = voiceModel || 'facebook/mms-tts-spa';
-        const hfEndpoint = `https://router.huggingface.co/hf-inference/models/${modelId}`;
-        
-        console.log(`Sending TTS request to: ${hfEndpoint}`);
-        try {
-            const ttsResponse = await axios({
-                url: hfEndpoint,
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${process.env.HF_TOKEN}`,
-                    'Content-Type': 'application/json',
-                },
-                data: { inputs: text },
-                responseType: 'arraybuffer',
-            });
-            fs.writeFileSync(audioPath, Buffer.from(ttsResponse.data));
-        } catch (err) {
-            const errorMsg = err.response?.data ? Buffer.from(err.response.data).toString() : err.message;
-            console.error('TTS Error Details:', errorMsg);
-            throw new Error(`Error en TTS (Hugging Face): ${errorMsg}`);
-        }
+        // Get Google TTS URL (Unlimited for short texts, using simple getAudioUrl)
+        const url = googleTTS.getAudioUrl(text, {
+            lang: 'es',
+            slow: false,
+            host: 'https://translate.google.com',
+        });
 
-        onProgress('Generating images for each scene...', 40);
+        const audioRes = await axios.get(url, { responseType: 'arraybuffer' });
+        fs.writeFileSync(audioPath, Buffer.from(audioRes.data));
+
+        onProgress('Generando imágenes (Pollinations.ai)...', 40);
         const imagePaths = [];
-        const imageModel = 'stabilityai/stable-diffusion-xl-base-1.0';
         
         for (let i = 0; i < segments.length; i++) {
-            onProgress(`Generating image ${i + 1}/${segments.length}...`, 40 + (i / segments.length) * 30);
+            onProgress(`Generando escena ${i + 1}/${segments.length}...`, 40 + (i / segments.length) * 30);
             const imgPath = path.join(sessionDir, `img_${i}.jpg`);
-            const hfImgEndpoint = `https://router.huggingface.co/hf-inference/models/${imageModel}`;
             
-            console.log(`Sending Image request ${i} to: ${hfImgEndpoint}`);
-            try {
-                const imgResponse = await axios({
-                    url: hfImgEndpoint,
-                    method: 'POST',
-                    headers: {
-                        Authorization: `Bearer ${process.env.HF_TOKEN}`,
-                        'Content-Type': 'application/json',
-                    },
-                    data: {
-                        inputs: segments[i],
-                        parameters: {
-                            negative_prompt: 'blurry, low quality, distorted',
-                            width: 1024,
-                            height: 1024,
-                        }
-                    },
-                    responseType: 'arraybuffer',
-                });
-                fs.writeFileSync(imgPath, Buffer.from(imgResponse.data));
-                imagePaths.push(imgPath);
-            } catch (err) {
-                const errorMsg = err.response?.data ? Buffer.from(err.response.data).toString() : err.message;
-                console.error(`Image Error ${i} Details:`, errorMsg);
-                throw new Error(`Error en Imagen (Hugging Face) [${i}]: ${errorMsg}`);
-            }
+            // Pollinations.ai URL-based generation
+            const prompt = encodeURIComponent(segments[i] + ", high quality, 4k, vertical cinematic");
+            const pollUrl = `https://pollinations.ai/p/${prompt}?width=1080&height=1920&seed=${Math.floor(Math.random() * 100000)}&model=flux&nologo=true`;
+            
+            console.log(`Downloading image from: ${pollUrl}`);
+            const imgRes = await axios.get(pollUrl, { responseType: 'arraybuffer' });
+            fs.writeFileSync(imgPath, Buffer.from(imgRes.data));
+            imagePaths.push(imgPath);
         }
 
-        onProgress('Getting audio duration...', 75);
+        onProgress('Calculando duración...', 75);
         const duration = await getAudioDuration(audioPath);
         const segmentDuration = duration / segments.length;
 
-        onProgress('Assembling final video with FFmpeg...', 85);
+        onProgress('Ensamblando video final (FFmpeg)...', 85);
         const outputFilename = `video_${taskId}.mp4`;
         const outputPath = path.join(OUTPUT_DIR, outputFilename);
 
         await assembleVideo(imagePaths, audioPath, outputPath, segmentDuration);
 
-        onProgress('Cleaning up...', 95);
-        // In a real app, you might keep the temp files for a bit, but for now we clean up
-        // fs.rmSync(sessionDir, { recursive: true, force: true });
-
-        onProgress('Video generation complete!', 100);
+        onProgress('¡Video completado con éxito!', 100);
         return `/outputs/${outputFilename}`;
 
     } catch (error) {
-        console.error('Error in generateVideo:', error);
+        console.error('Error en generateVideo:', error);
         throw error;
     }
 }
@@ -128,21 +88,19 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
     return new Promise((resolve, reject) => {
         const command = ffmpeg();
 
-        imagePaths.forEach((img, index) => {
+        imagePaths.forEach((img) => {
             command.input(img).loop(segmentDuration);
         });
 
         command
             .input(audioPath)
             .complexFilter([
-                // Scale and crop to 1080x1920 (Vertical 9:16)
                 ...imagePaths.map((_, i) => ({
                     filter: 'scale',
                     options: '1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
                     inputs: i.toString(),
                     outputs: `v${i}`
                 })),
-                // Concatenate the video segments
                 {
                     filter: 'concat',
                     options: { n: imagePaths.length, v: 1, a: 0 },
@@ -151,7 +109,7 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
                 }
             ])
             .map('vout')
-            .map('1:a') // Map the audio input (index 1 since images are 0 to N-1)
+            .map(`${imagePaths.length}:a`) // Map audio from the last input
             .videoCodec('libx264')
             .audioCodec('aac')
             .outputOptions([
