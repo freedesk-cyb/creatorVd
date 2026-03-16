@@ -1,10 +1,18 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
-import { Video, Play, Download, Loader2, Send, Languages } from 'lucide-react';
+import { Video, Play, Download, Loader2, Send } from 'lucide-react';
 
 export default function Home() {
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
+  const [text, setText] = useState('');
+  const [voice, setVoice] = useState('es');
+  const [taskId, setTaskId] = useState(null);
+  const [status, setStatus] = useState(null);
+  const [progress, setProgress] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [error, setError] = useState(null);
   const [manualApiUrl, setManualApiUrl] = useState('');
   const [showManualUrl, setShowManualUrl] = useState(false);
 
