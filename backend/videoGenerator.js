@@ -106,36 +106,40 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
     return new Promise((resolve, reject) => {
         const command = ffmpeg();
 
-        // Add images first
+        // 1. Add all images
         imagePaths.forEach((img) => {
-            command.input(img).loop(segmentDuration);
+            command.input(img).inputOptions(['-loop 1']).inputOptions([`-t ${segmentDuration}`]);
         });
 
-        // Add audio last
+        // 2. Add audio
         command.input(audioPath);
 
         const audioIndex = imagePaths.length;
-        console.log(`FFmpeg Assembly: Images=${imagePaths.length}, AudioIndex=${audioIndex}`);
+        console.log(`FFmpeg Assembly Started: ${imagePaths.length} images, audio at index ${audioIndex}`);
 
-        const filterComplex = [
-            ...imagePaths.map((_, i) => ({
-                filter: 'scale',
-                options: '1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
-                inputs: `${i}:v`,
-                outputs: `v${i}`
-            })),
-            {
-                filter: 'concat',
-                options: { n: imagePaths.length, v: 1, a: 0 },
-                inputs: imagePaths.map((_, i) => `v${i}`),
-                outputs: 'vout'
-            }
-        ];
+        // 3. Build robust filter complex
+        const filterStr = [];
+        
+        // Scale each image and label it
+        imagePaths.forEach((_, i) => {
+            filterStr.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[v${i}]`);
+        });
+
+        // Concat video streams if more than 1 image
+        if (imagePaths.length > 1) {
+            const videoInputs = imagePaths.map((_, i) => `[v${i}]`).join('');
+            filterStr.push(`${videoInputs}concat=n=${imagePaths.length}:v=1:a=0[vout]`);
+        } else {
+            filterStr.push(`[v0]null[vout]`);
+        }
+
+        // Label the audio stream explicitly to avoid index errors
+        filterStr.push(`[${audioIndex}:a]anull[aout]`);
 
         command
-            .complexFilter(filterComplex)
-            .map('vout')
-            .map(`${audioIndex}:a`) // Explicitly mapping audio by its known index
+            .complexFilter(filterStr.join('; '))
+            .map('[vout]')
+            .map('[aout]')
             .videoCodec('libx264')
             .audioCodec('aac')
             .addOptions([
@@ -143,7 +147,7 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
                 '-shortest',
                 '-y'
             ])
-            .on('start', (cmd) => console.log('FFmpeg started with command:', cmd))
+            .on('start', (cmd) => console.log('FFmpeg command:', cmd))
             .on('end', () => resolve())
             .on('error', (err, stdout, stderr) => {
                 console.error('FFmpeg Error:', err.message);
