@@ -5,26 +5,23 @@ import { Video, Play, Download, Loader2, Send, Languages } from 'lucide-react';
 export default function Home() {
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
-  const [text, setText] = useState('');
-  const [voice, setVoice] = useState('es');
-  const [taskId, setTaskId] = useState(null);
-  const [status, setStatus] = useState(null);
-  const [progress, setProgress] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [videoUrl, setVideoUrl] = useState(null);
-  const [error, setError] = useState(null);
+  const [manualApiUrl, setManualApiUrl] = useState('');
+  const [showManualUrl, setShowManualUrl] = useState(false);
+
+  // Determine final API URL
+  const EFFECTIVE_API_URL = manualApiUrl || API_BASE_URL;
 
   useEffect(() => {
     let interval;
     if (taskId && !videoUrl && !error) {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`${API_BASE_URL}/api/status/${taskId}`);
+          const res = await fetch(`${EFFECTIVE_API_URL}/api/status/${taskId}`);
           const data = await res.json();
           setStatus(data.status);
           setProgress(data.progress);
           if (data.status === 'completed') {
-            setVideoUrl(`${API_BASE_URL}${data.videoUrl}`);
+            setVideoUrl(`${EFFECTIVE_API_URL}${data.videoUrl}`);
             setLoading(false);
             clearInterval(interval);
           } else if (data.status === 'failed') {
@@ -38,7 +35,7 @@ export default function Home() {
       }, 2000);
     }
     return () => clearInterval(interval);
-  }, [taskId, videoUrl, error, API_BASE_URL]);
+  }, [taskId, videoUrl, error, EFFECTIVE_API_URL]);
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -49,7 +46,7 @@ export default function Home() {
     setStatus('Iniciando...');
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/generate`, {
+      const res = await fetch(`${EFFECTIVE_API_URL}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice }),
@@ -58,7 +55,8 @@ export default function Home() {
       if (data.error) throw new Error(data.error);
       setTaskId(data.taskId);
     } catch (err) {
-      setError(`Error de conexión: ${err.message}. (URL intentada: ${API_BASE_URL}). Asegúrate de que el backend esté encendido y la URL sea HTTPS.`);
+      setError(`Error de conexión: ${err.message}. (URL intentada: ${EFFECTIVE_API_URL})`);
+      setShowManualUrl(true);
       setLoading(false);
     }
   };
@@ -78,6 +76,23 @@ export default function Home() {
           </div>
           <p className="subtitle">Convierte tus historias en videos verticales impactantes</p>
         </header>
+
+        {showManualUrl && (
+          <div className="card manual-url-card anim-fade-in">
+            <p><strong>🛠️ Reparación de Conexión:</strong></p>
+            <p className="small">Vercel no está detectando tu servidor. Pega aquí tu URL de Railway (que empiece con https://):</p>
+            <div className="form-row">
+              <input 
+                type="text" 
+                placeholder="https://tu-backend.railway.app" 
+                value={manualApiUrl}
+                onChange={(e) => setManualApiUrl(e.target.value)}
+                className="input-manual"
+              />
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowManualUrl(false)}>Ocultar</button>
+            </div>
+          </div>
+        )}
 
         <section className="input-section card">
           <div className="form-group">
@@ -138,7 +153,7 @@ export default function Home() {
               <video src={videoUrl} controls className="video-player" />
             </div>
             <div className="actions-row">
-              <a href={videoUrl} download className="btn btn-secondary">
+              <a href={videoUrl} download className="btn btn-secondary" target="_blank" rel="noopener noreferrer">
                 <Download size={18} />
                 Descargar MP4
               </a>
@@ -332,6 +347,35 @@ export default function Home() {
         .actions-row {
           display: flex;
           justify-content: center;
+        }
+
+        .manual-url-card {
+          background: #1e1b4b;
+          border: 1px dashed #6366f1;
+          margin-bottom: 2rem;
+          padding: 1.5rem;
+        }
+
+        .input-manual {
+          flex: 1;
+          background: #0f172a;
+          border: 1px solid #334155;
+          border-radius: 0.5rem;
+          color: white;
+          padding: 0.75rem;
+          font-size: 0.875rem;
+        }
+
+        .small {
+          font-size: 0.825rem;
+          color: #94a3b8;
+          margin-bottom: 1rem;
+          display: block;
+        }
+
+        .btn-sm {
+          padding: 0.5rem 1rem;
+          font-size: 0.875rem;
         }
 
         .anim-fade-in {
