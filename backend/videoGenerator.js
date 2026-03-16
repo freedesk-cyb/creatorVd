@@ -32,15 +32,20 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
         onProgress('Generating audio narration...', 20);
         const audioPath = path.join(sessionDir, 'narration.wav');
         
-        // TTS using Hugging Face (approximate - HF TTS usually returns a Blob/Buffer)
-        // Note: Models like facebook/mms-tts-spa are common for HF
-        const ttsResponse = await hf.textToSpeech({
-            model: voiceModel || 'facebook/mms-tts-spa', // Default to Spanish TTS
-            inputs: text
+        // TTS using Hugging Face Router API (updated endpoint)
+        console.log('Calling TTS API at router.huggingface.co...');
+        const ttsResponse = await axios({
+            url: `https://router.huggingface.co/models/${voiceModel || 'facebook/mms-tts-spa'}`,
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${process.env.HF_TOKEN}`,
+                'Content-Type': 'application/json',
+            },
+            data: { inputs: text },
+            responseType: 'arraybuffer',
         });
         
-        const audioBuffer = Buffer.from(await ttsResponse.arrayBuffer());
-        fs.writeFileSync(audioPath, audioBuffer);
+        fs.writeFileSync(audioPath, Buffer.from(ttsResponse.data));
 
         onProgress('Generating images for each scene...', 40);
         const imagePaths = [];
@@ -48,18 +53,26 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
             onProgress(`Generating image ${i + 1}/${segments.length}...`, 40 + (i / segments.length) * 30);
             const imgPath = path.join(sessionDir, `img_${i}.jpg`);
             
-            const imgResponse = await hf.textToImage({
-                model: 'stabilityai/stable-diffusion-xl-base-1.0',
-                inputs: segments[i],
-                parameters: {
-                    negative_prompt: 'blurry, low quality, distorted',
-                    width: 1024,
-                    height: 1024, // SDXL base is 1024x1024
-                }
+            console.log(`Calling Image API for segment ${i} at router.huggingface.co...`);
+            const imgResponse = await axios({
+                url: 'https://router.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0',
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${process.env.HF_TOKEN}`,
+                    'Content-Type': 'application/json',
+                },
+                data: {
+                    inputs: segments[i],
+                    parameters: {
+                        negative_prompt: 'blurry, low quality, distorted',
+                        width: 1024,
+                        height: 1024,
+                    }
+                },
+                responseType: 'arraybuffer',
             });
             
-            const imgBuffer = Buffer.from(await imgResponse.arrayBuffer());
-            fs.writeFileSync(imgPath, imgBuffer);
+            fs.writeFileSync(imgPath, Buffer.from(imgResponse.data));
             imagePaths.push(imgPath);
         }
 
