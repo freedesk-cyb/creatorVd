@@ -124,53 +124,64 @@ function getAudioDuration(audioPath) {
 
 function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
     return new Promise((resolve, reject) => {
+        const sessionDir = path.dirname(audioPath);
+        const concatFilePath = path.join(sessionDir, 'concat_list.txt');
+        
+        // 1. Create the concat list file (The most memory-efficient way)
+        // Note: FFmpeg concat demuxer requires the 'duration' after each 'file'
+        // and repetitive duration for the last file is a common stability trick.
+        let concatContent = '';
+        imagePaths.forEach((img) => {
+            // Use absolute paths and escape single quotes for FFmpeg safety
+            const escapedPath = img.replace(/'/g, "'\\''");
+            concatContent += `file '${escapedPath}'\nduration ${segmentDuration}\n`;
+        });
+        // Add the last file one more time without duration per FFmpeg spec
+        const lastEscapedPath = imagePaths[imagePaths.length - 1].replace(/'/g, "'\\''");
+        concatContent += `file '${lastEscapedPath}'\n`;
+
+        fs.writeFileSync(concatFilePath, concatContent);
+        console.log(`Created concat list: ${concatFilePath}`);
+
         const command = ffmpeg();
 
-        // 1. Add images as loop inputs
-        imagePaths.forEach((img) => {
-            command.input(img).inputOptions(['-loop 1']).inputOptions([`-t ${segmentDuration}`]);
-        });
-
-        // 2. Add audio
+        // 2. Add inputs
+        // -f concat: interprets the input as a list of files
+        // -safe 0: allows absolute paths
+        command.input(concatFilePath).inputOptions(['-f concat', '-safe 0']);
         command.input(audioPath);
 
-        const audioIndex = imagePaths.length;
-
-        // 3. Optimized filter for 720x1280 (Vertical HD)
-        const filterStr = [];
-        imagePaths.forEach((_, i) => {
-            filterStr.push(`[${i}:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,format=yuv420p[v${i}]`);
-        });
-
-        if (imagePaths.length > 1) {
-            const videoInputs = imagePaths.map((_, i) => `[v${i}]`).join('');
-            filterStr.push(`${videoInputs}concat=n=${imagePaths.length}:v=1:a=0[vout]`);
-        } else {
-            filterStr.push(`[v0]null[vout]`);
-        }
-
-        // Pass audio through filter graph to give it an explicit label
-        filterStr.push(`[${audioIndex}:a]anull[aout]`);
-
+        // 3. Simple filter for 720x1280 (Applies to the whole stream, low RAM)
         command
-            .complexFilter(filterStr.join('; '))
-            .map('[vout]')
-            .map('[aout]')
+            .videoFilters([
+                {
+                    filter: 'scale',
+                    options: '720:1280:force_original_aspect_ratio=increase'
+                },
+                {
+                    filter: 'crop',
+                    options: '720:1280'
+                },
+                {
+                    filter: 'format',
+                    options: 'yuv420p'
+                }
+            ])
             .videoCodec('libx264')
             .audioCodec('aac')
             .addOptions([
                 '-preset ultrafast', 
                 '-tune stillimage',
                 '-shortest',
-                '-pix_fmt yuv420p',
                 '-y'
             ])
-            .on('start', (cmd) => console.log('Executing FFmpeg:', cmd))
+            .on('start', (cmd) => console.log('Executing FFmpeg Concat:', cmd))
             .on('progress', (progress) => {
                 if (progress.percent) {
-                    // Map 0-100% of FFmpeg to 85-98% of total progress
                     const totalProgress = 85 + (progress.percent * 0.13);
                     onProgress(`Ensamblando video... ${Math.round(progress.percent)}%`, totalProgress);
+                } else if (progress.frames) {
+                    onProgress(`Ensamblando video (procesando cuadros)...`, 88);
                 }
             })
             .on('end', () => {
@@ -184,10 +195,10 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
             })
             .save(outputPath);
             
-        // Set a timeout of 3 minutes for FFmpeg assembly
+        // Timeout of 5 minutes for safety
         setTimeout(() => {
             reject(new Error('El ensamblado del video tardó demasiado (Timeout).'));
-        }, 180000); 
+        }, 300000); 
     });
 }
 
