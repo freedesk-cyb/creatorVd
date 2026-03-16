@@ -40,10 +40,21 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
         // Download and concat all audio buffers
         const audioBuffers = [];
         for (const res of results) {
-            const audioData = await axios.get(res.url, { responseType: 'arraybuffer' });
-            audioBuffers.push(Buffer.from(audioData.data));
+            console.log(`Downloading audio chunk from Google...`);
+            const audioChunk = await axios.get(res.url, { responseType: 'arraybuffer' });
+            if (audioChunk.data) {
+                audioBuffers.push(Buffer.from(audioChunk.data));
+            }
         }
-        fs.writeFileSync(audioPath, Buffer.concat(audioBuffers));
+        
+        const finalAudioBuffer = Buffer.concat(audioBuffers);
+        console.log(`Audio generated. Total size: ${finalAudioBuffer.length} bytes`);
+        
+        if (finalAudioBuffer.length < 100) {
+            throw new Error("El audio generado es demasiado pequeño o está corrupto.");
+        }
+        
+        fs.writeFileSync(audioPath, finalAudioBuffer);
 
         onProgress('Generando imágenes (Pollinations.ai)...', 40);
         const imagePaths = [];
@@ -53,10 +64,10 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
             const imgPath = path.join(sessionDir, `img_${i}.jpg`);
             
             // Pollinations.ai URL-based generation
-            const prompt = encodeURIComponent(segments[i] + ", high quality, 4k, vertical cinematic style, detailed");
-            const pollUrl = `https://pollinations.ai/p/${prompt}?width=1080&height=1920&seed=${Math.floor(Math.random() * 100000)}&model=flux&nologo=true`;
+            const prompt = encodeURIComponent(segments[i] + ", vertical cinematic, high detail, colorful, 4k");
+            const pollUrl = `https://pollinations.ai/p/${prompt}?width=1080&height=1920&seed=${Math.floor(Math.random() * 100000)}&nologo=true`;
             
-            console.log(`Downloading image from: ${pollUrl}`);
+            console.log(`Requesting image ${i}: ${pollUrl}`);
             const imgRes = await axios.get(pollUrl, { responseType: 'arraybuffer' });
             fs.writeFileSync(imgPath, Buffer.from(imgRes.data));
             imagePaths.push(imgPath);
@@ -65,6 +76,7 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
         onProgress('Calculando duración...', 75);
         const duration = await getAudioDuration(audioPath);
         const segmentDuration = duration / segments.length;
+        console.log(`Total duration: ${duration}s, per segment: ${segmentDuration}s`);
 
         onProgress('Ensamblando video final (FFmpeg)...', 85);
         const outputFilename = `video_${taskId}.mp4`;
@@ -76,7 +88,7 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
         return `/outputs/${outputFilename}`;
 
     } catch (error) {
-        console.error('Error en generateVideo:', error);
+        console.error('Error detallado en generateVideo:', error);
         throw error;
     }
 }
@@ -84,8 +96,8 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
 function getAudioDuration(audioPath) {
     return new Promise((resolve, reject) => {
         ffmpeg.ffprobe(audioPath, (err, metadata) => {
-            if (err) return reject(err);
-            resolve(metadata.format.duration);
+            if (err) return reject(new Error(`Fallo al analizar audio: ${err.message}`));
+            resolve(metadata.format.duration || 0);
         });
     });
 }
@@ -94,17 +106,22 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
     return new Promise((resolve, reject) => {
         const command = ffmpeg();
 
+        // Add images first
         imagePaths.forEach((img) => {
             command.input(img).loop(segmentDuration);
         });
 
+        // Add audio last
         command.input(audioPath);
+
+        const audioIndex = imagePaths.length;
+        console.log(`FFmpeg Assembly: Images=${imagePaths.length}, AudioIndex=${audioIndex}`);
 
         const filterComplex = [
             ...imagePaths.map((_, i) => ({
                 filter: 'scale',
                 options: '1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
-                inputs: i.toString(),
+                inputs: `${i}:v`,
                 outputs: `v${i}`
             })),
             {
@@ -118,17 +135,19 @@ function assembleVideo(imagePaths, audioPath, outputPath, segmentDuration) {
         command
             .complexFilter(filterComplex)
             .map('vout')
-            .map(`${imagePaths.length}:a`) // Map the audio from the LAST input explicitly
+            .map(`${audioIndex}:a`) // Explicitly mapping audio by its known index
             .videoCodec('libx264')
             .audioCodec('aac')
-            .outputOptions([
+            .addOptions([
                 '-pix_fmt yuv420p',
                 '-shortest',
-                '-y' // Overwrite
+                '-y'
             ])
+            .on('start', (cmd) => console.log('FFmpeg started with command:', cmd))
             .on('end', () => resolve())
-            .on('error', (err) => {
+            .on('error', (err, stdout, stderr) => {
                 console.error('FFmpeg Error:', err.message);
+                console.error('FFmpeg stderr:', stderr);
                 reject(err);
             })
             .save(outputPath);
