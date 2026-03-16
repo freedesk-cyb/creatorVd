@@ -38,7 +38,7 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
         const audioBuffers = [];
         for (const res of results) {
             const audioData = await axios.get(res.url, { responseType: 'arraybuffer' });
-            audioBuffers.push(Buffer.from(audioRes.data || audioData.data));
+            audioBuffers.push(Buffer.from(audioData.data));
         }
         fs.writeFileSync(audioPath, Buffer.concat(audioBuffers));
 
