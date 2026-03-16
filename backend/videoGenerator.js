@@ -23,6 +23,9 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
     fs.mkdirSync(sessionDir);
 
     try {
+        onProgress('Analizando texto y escenas...', 5);
+        const segments = text.split(/[.!?]+/).filter(s => s.trim().length > 0).map(s => s.trim());
+
         onProgress('Generando audio (Google TTS)...', 20);
         const audioPath = path.join(sessionDir, 'narration.wav');
         
