@@ -22,16 +22,25 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
     const sessionDir = path.join(TEMP_DIR, taskId);
     fs.mkdirSync(sessionDir);
 
+    // Map voice selection to Google TTS language codes
+    let lang = 'es';
+    if (voiceModel === 'en') lang = 'en';
+    if (voiceModel === 'pt') lang = 'pt';
+    if (voiceModel === 'fr') lang = 'fr';
+    if (voiceModel === 'it') lang = 'it';
+    
+    console.log(`Starting generation with language: ${lang}`);
+
     try {
         onProgress('Analizando texto y escenas...', 5);
         const segments = text.split(/[.!?]+/).filter(s => s.trim().length > 0).map(s => s.trim());
 
-        onProgress('Generando audio (Google TTS)...', 20);
+        onProgress(`Generando audio (${lang})...`, 20);
         const audioPath = path.join(sessionDir, 'narration.wav');
         
-        // Support longer texts by splitting into chunks (200 chars limit for standard Google TTS)
+        // Support longer texts by splitting into chunks
         const results = googleTTS.getAllAudioUrls(text, {
-            lang: 'es',
+            lang: lang,
             slow: false,
             host: 'https://translate.google.com',
             splitPunct: '.,!? ',

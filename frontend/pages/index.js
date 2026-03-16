@@ -6,7 +6,7 @@ export default function Home() {
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
   const [text, setText] = useState('');
-  const [voice, setVoice] = useState('facebook/mms-tts-spa');
+  const [voice, setVoice] = useState('es');
   const [taskId, setTaskId] = useState(null);
   const [status, setStatus] = useState(null);
   const [progress, setProgress] = useState(0);
@@ -92,11 +92,13 @@ export default function Home() {
 
           <div className="form-row">
             <div className="form-group">
-              <label>Seleccionar Voz (Hugging Face Model)</label>
+              <label>Seleccionar Idioma de Narración</label>
               <select value={voice} onChange={(e) => setVoice(e.target.value)}>
-                <option value="facebook/mms-tts-spa">Español (MMS)</option>
-                <option value="suno/bark-small">Inglés (Bark Small)</option>
-                <option value="espnet/kan-bayashi_ljspeech_vits">Inglés (VITS)</option>
+                <option value="es">Español (Google TTS)</option>
+                <option value="en">Inglés (Google TTS)</option>
+                <option value="pt">Portugués (Google TTS)</option>
+                <option value="fr">Francés (Google TTS)</option>
+                <option value="it">Italiano (Google TTS)</option>
               </select>
             </div>
 
