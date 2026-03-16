@@ -32,48 +32,62 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
         onProgress('Generating audio narration...', 20);
         const audioPath = path.join(sessionDir, 'narration.wav');
         
-        // TTS using Hugging Face Router API (updated endpoint)
-        console.log('Calling TTS API at router.huggingface.co...');
-        const ttsResponse = await axios({
-            url: `https://router.huggingface.co/models/${voiceModel || 'facebook/mms-tts-spa'}`,
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${process.env.HF_TOKEN}`,
-                'Content-Type': 'application/json',
-            },
-            data: { inputs: text },
-            responseType: 'arraybuffer',
-        });
+        // Try the new router endpoint, but with a fallback or better logging
+        const modelId = voiceModel || 'facebook/mms-tts-spa';
+        const hfEndpoint = `https://router.huggingface.co/models/${modelId}`;
         
-        fs.writeFileSync(audioPath, Buffer.from(ttsResponse.data));
-
-        onProgress('Generating images for each scene...', 40);
-        const imagePaths = [];
-        for (let i = 0; i < segments.length; i++) {
-            onProgress(`Generating image ${i + 1}/${segments.length}...`, 40 + (i / segments.length) * 30);
-            const imgPath = path.join(sessionDir, `img_${i}.jpg`);
-            
-            console.log(`Calling Image API for segment ${i} at router.huggingface.co...`);
-            const imgResponse = await axios({
-                url: 'https://router.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0',
+        console.log(`Sending TTS request to: ${hfEndpoint}`);
+        try {
+            const ttsResponse = await axios({
+                url: hfEndpoint,
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${process.env.HF_TOKEN}`,
                     'Content-Type': 'application/json',
                 },
-                data: {
-                    inputs: segments[i],
-                    parameters: {
-                        negative_prompt: 'blurry, low quality, distorted',
-                        width: 1024,
-                        height: 1024,
-                    }
-                },
+                data: { inputs: text },
                 responseType: 'arraybuffer',
             });
+            fs.writeFileSync(audioPath, Buffer.from(ttsResponse.data));
+        } catch (err) {
+            console.error('TTS Error Details:', err.response?.data ? Buffer.from(err.response.data).toString() : err.message);
+            throw new Error(`Error en TTS (Hugging Face): ${err.message}`);
+        }
+
+        onProgress('Generating images for each scene...', 40);
+        const imagePaths = [];
+        const imageModel = 'stabilityai/stable-diffusion-xl-base-1.0';
+        
+        for (let i = 0; i < segments.length; i++) {
+            onProgress(`Generating image ${i + 1}/${segments.length}...`, 40 + (i / segments.length) * 30);
+            const imgPath = path.join(sessionDir, `img_${i}.jpg`);
+            const hfImgEndpoint = `https://router.huggingface.co/models/${imageModel}`;
             
-            fs.writeFileSync(imgPath, Buffer.from(imgResponse.data));
-            imagePaths.push(imgPath);
+            console.log(`Sending Image request ${i} to: ${hfImgEndpoint}`);
+            try {
+                const imgResponse = await axios({
+                    url: hfImgEndpoint,
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${process.env.HF_TOKEN}`,
+                        'Content-Type': 'application/json',
+                    },
+                    data: {
+                        inputs: segments[i],
+                        parameters: {
+                            negative_prompt: 'blurry, low quality, distorted',
+                            width: 1024,
+                            height: 1024,
+                        }
+                    },
+                    responseType: 'arraybuffer',
+                });
+                fs.writeFileSync(imgPath, Buffer.from(imgResponse.data));
+                imagePaths.push(imgPath);
+            } catch (err) {
+                console.error(`Image Error ${i} Details:`, err.response?.data ? Buffer.from(err.response.data).toString() : err.message);
+                throw new Error(`Error en Imagen (Hugging Face) [${i}]: ${err.message}`);
+            }
         }
 
         onProgress('Getting audio duration...', 75);
