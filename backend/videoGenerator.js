@@ -32,9 +32,9 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
         onProgress('Generating audio narration...', 20);
         const audioPath = path.join(sessionDir, 'narration.wav');
         
-        // Try the new router endpoint, but with a fallback or better logging
+        // Use the new router with the hf-inference provider prefix
         const modelId = voiceModel || 'facebook/mms-tts-spa';
-        const hfEndpoint = `https://router.huggingface.co/models/${modelId}`;
+        const hfEndpoint = `https://router.huggingface.co/hf-inference/models/${modelId}`;
         
         console.log(`Sending TTS request to: ${hfEndpoint}`);
         try {
@@ -50,8 +50,9 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
             });
             fs.writeFileSync(audioPath, Buffer.from(ttsResponse.data));
         } catch (err) {
-            console.error('TTS Error Details:', err.response?.data ? Buffer.from(err.response.data).toString() : err.message);
-            throw new Error(`Error en TTS (Hugging Face): ${err.message}`);
+            const errorMsg = err.response?.data ? Buffer.from(err.response.data).toString() : err.message;
+            console.error('TTS Error Details:', errorMsg);
+            throw new Error(`Error en TTS (Hugging Face): ${errorMsg}`);
         }
 
         onProgress('Generating images for each scene...', 40);
@@ -61,7 +62,7 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
         for (let i = 0; i < segments.length; i++) {
             onProgress(`Generating image ${i + 1}/${segments.length}...`, 40 + (i / segments.length) * 30);
             const imgPath = path.join(sessionDir, `img_${i}.jpg`);
-            const hfImgEndpoint = `https://router.huggingface.co/models/${imageModel}`;
+            const hfImgEndpoint = `https://router.huggingface.co/hf-inference/models/${imageModel}`;
             
             console.log(`Sending Image request ${i} to: ${hfImgEndpoint}`);
             try {
@@ -85,8 +86,9 @@ async function generateVideo(text, voiceModel, taskId, onProgress) {
                 fs.writeFileSync(imgPath, Buffer.from(imgResponse.data));
                 imagePaths.push(imgPath);
             } catch (err) {
-                console.error(`Image Error ${i} Details:`, err.response?.data ? Buffer.from(err.response.data).toString() : err.message);
-                throw new Error(`Error en Imagen (Hugging Face) [${i}]: ${err.message}`);
+                const errorMsg = err.response?.data ? Buffer.from(err.response.data).toString() : err.message;
+                console.error(`Image Error ${i} Details:`, errorMsg);
+                throw new Error(`Error en Imagen (Hugging Face) [${i}]: ${errorMsg}`);
             }
         }
 
